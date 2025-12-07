@@ -13,12 +13,22 @@ from models import UNet2D  # <- ahora usamos la U-Net 2D
 
 def main():
     # =========================
+    # 0. Rutas base (persistentes)
+    # =========================
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(base_dir, "data")
+    results_dir = os.path.join(base_dir, "results")
+
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(results_dir, exist_ok=True)
+
+    # =========================
     # 1. Configuración general
     # =========================
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device:", device)
 
-    root = "./data"   # cambia si quieres otra ruta
+    root = data_dir   # aquí se descargará SPEECHCOMMANDS
 
     batch_size = 8
     num_workers = 0
@@ -49,7 +59,7 @@ def main():
         noise_type="white",
         add_reverb=True,
         reverb_prob=0.5,
-        max_items=1000
+        max_items=1000,
     )
 
     n_total = len(full_ds)
@@ -85,7 +95,7 @@ def main():
         n_mels=n_mels,
         center=True,
         pad_mode="reflect",
-        power=1.0,         # magnitud^2; puedes cambiar a 2.0 si quieres energía
+        power=1.0,         # magnitud
     ).to(device)
 
     def waveform_to_logmel(wav: torch.Tensor) -> torch.Tensor:
@@ -93,11 +103,10 @@ def main():
         wav: (B, 1, T)
         -> log-mel: (B, 1, n_mels, T_frames)
         """
-        # quitar canal
-        wav_mono = wav.squeeze(1)  # (B, T)
-        mel = mel_transform(wav_mono)  # (B, n_mels, T_frames)
-        log_mel = torch.log1p(mel)     # log(1 + mel) para estabilizar
-        return log_mel.unsqueeze(1)    # (B, 1, n_mels, T_frames)
+        wav_mono = wav.squeeze(1)        # (B, T)
+        mel = mel_transform(wav_mono)    # (B, n_mels, T_frames)
+        log_mel = torch.log1p(mel)       # log(1 + mel) para estabilizar
+        return log_mel.unsqueeze(1)      # (B, 1, n_mels, T_frames)
 
     # =========================
     # 4. Modelo, loss, optim
@@ -110,7 +119,7 @@ def main():
         kernel_size=3,
         use_batchnorm=True,
         dropout=0.0,
-        final_activation=None,  # o "tanh" si quieres limitar la salida
+        final_activation=None,
     ).to(device)
 
     criterion = nn.MSELoss()          # loss en espacio log-mel
@@ -138,9 +147,8 @@ def main():
             noisy = noisy.to(device)   # [B,1,T]
             clean = clean.to(device)
 
-            # Onda -> log-mel
-            noisy_spec = waveform_to_logmel(noisy)   # [B,1,F,T']
-            clean_spec = waveform_to_logmel(clean)   # [B,1,F,T']
+            noisy_spec = waveform_to_logmel(noisy)
+            clean_spec = waveform_to_logmel(clean)
 
             optimizer.zero_grad()
             pred_spec = model(noisy_spec)
@@ -178,7 +186,6 @@ def main():
         epoch_val_loss = running_val_loss / len(val_loader)
         val_losses.append(epoch_val_loss)
 
-        # ---- Print resumen de época ----
         print(
             f"Epoch {epoch:03d}/{max_epochs} "
             f"| train_loss = {epoch_train_loss:.6f} "
@@ -199,11 +206,15 @@ def main():
             print("Early stopping activado.")
             break
 
-    # Restaurar mejor modelo
+    # Restaurar mejor modelo y guardar
     if best_state_dict is not None:
         model.load_state_dict(best_state_dict)
         model.to(device)
         print(f"Mejor val_loss alcanzado: {best_val_loss:.6f}")
+
+        best_model_path = os.path.join(results_dir, "best_model.pt")
+        torch.save(model.state_dict(), best_model_path)
+        print(f"Modelo guardado en: {best_model_path}")
     else:
         print("No se guardó ningún mejor estado (algo raro pasó).")
 
@@ -219,7 +230,10 @@ def main():
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
-    plt.show()
+
+    curve_path = os.path.join(results_dir, "loss_curve.png")
+    plt.savefig(curve_path)
+    print(f"Curva de loss guardada en: {curve_path}")
 
 
 if __name__ == "__main__":

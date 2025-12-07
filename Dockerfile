@@ -1,0 +1,27 @@
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+
+# Instalar torchaudio y libs de audio
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/cu124 \
+      torchaudio==2.5.1 && \
+    pip install --no-cache-dir \
+      soundfile \
+      librosa \
+      torchmetrics[audio] \
+      asteroid
+
+
+# Directorio de trabajo
+WORKDIR /workspace
+
+# Copiar el proyecto
+COPY . /workspace
+
+# Asegurar carpetas (aunque main.py también las crea)
+RUN mkdir -p /workspace/data /workspace/results
+
+# Comando por defecto: entrenar
+CMD ["python", "main.py"]
