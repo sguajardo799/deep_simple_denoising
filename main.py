@@ -7,6 +7,7 @@ from src.data import NoisySpeechCommands, get_data_splits
 from src.models import UNet2D
 from src.features import get_transform
 from src.train import train_model
+from src.losses import build_loss
 
 def main():
     # 1. Cargar configuración
@@ -16,6 +17,13 @@ def main():
     
     config = Config.from_yaml(config_path)
     print(f"Device: {config.general.device}")
+
+    # Optimizations for A100
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
+        print("TF32 and CUDNN Benchmark enabled")
 
     # 2. Setup Data
     # Asegurar directorios
@@ -66,11 +74,15 @@ def main():
         final_activation=None,
     ).to(config.general.device)
 
-    # 4. Setup Transform
+    # 4. Setup Training
+    criterion = build_loss(config, config.general.device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
+
+    # 5. Setup Transform
     transform = get_transform(config.audio, config.general.device)
 
-    # 5. Train
-    train_model(config, model, train_loader, val_loader, transform)
+    # 6. Train
+    train_model(config, model, train_loader, val_loader, transform, criterion, optimizer)
 
 if __name__ == "__main__":
     main()

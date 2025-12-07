@@ -6,10 +6,25 @@ from tqdm.auto import tqdm
 from src.config import Config
 from src.utils import plot_losses
 
+import torchaudio
+from src.losses import CompositeLoss
+
 def train_one_epoch(model, loader, criterion, optimizer, transform, device, log_interval, epoch):
     model.train()
     running_loss = 0.0
     loop = tqdm(loader, desc=f"Epoch {epoch} [Train]", leave=False)
+
+    scaler = torch.cuda.amp.GradScaler()
+    
+    # Pre-calculate Spectrogram transform for phase extraction if needed for CompositeLoss
+    # We need the complex spectrogram of the noisy signal to get the phase.
+    stft = torchaudio.transforms.Spectrogram(
+        n_fft=512, # Assuming default, should ideally come from config but transform object doesn't expose it easily
+        hop_length=128,
+        power=None, # Complex
+        center=True,
+        pad_mode="reflect",
+    ).to(device)
 
     for batch_idx, (noisy, clean) in enumerate(loop):
         noisy = noisy.to(device)
@@ -17,12 +32,28 @@ def train_one_epoch(model, loader, criterion, optimizer, transform, device, log_
 
         noisy_spec = transform(noisy.squeeze(1)).unsqueeze(1)
         clean_spec = transform(clean.squeeze(1)).unsqueeze(1)
+        
+        # Extract phase for CompositeLoss
+        if isinstance(criterion, CompositeLoss):
+             with torch.no_grad():
+                noisy_complex = stft(noisy.squeeze(1))
+                noisy_phase = torch.angle(noisy_complex)
+        else:
+            noisy_phase = None
 
         optimizer.zero_grad()
-        pred_spec = model(noisy_spec)
-        loss = criterion(pred_spec, clean_spec)
-        loss.backward()
-        optimizer.step()
+        
+        with torch.cuda.amp.autocast(enabled=True):
+            pred_spec = model(noisy_spec)
+            
+            if isinstance(criterion, CompositeLoss):
+                loss = criterion(pred_spec, clean_spec, noisy_phase, clean)
+            else:
+                loss = criterion(pred_spec, clean_spec)
+        
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         running_loss += loss.item()
 
@@ -35,6 +66,15 @@ def validate_one_epoch(model, loader, criterion, transform, device, epoch):
     model.eval()
     running_loss = 0.0
     
+    # Pre-calculate Spectrogram transform for phase extraction
+    stft = torchaudio.transforms.Spectrogram(
+        n_fft=512,
+        hop_length=128,
+        power=None,
+        center=True,
+        pad_mode="reflect",
+    ).to(device)
+    
     with torch.no_grad():
         loop = tqdm(loader, desc=f"Epoch {epoch} [Val]  ", leave=False)
         for noisy, clean in loop:
@@ -43,26 +83,35 @@ def validate_one_epoch(model, loader, criterion, transform, device, epoch):
 
             noisy_spec = transform(noisy.squeeze(1)).unsqueeze(1)
             clean_spec = transform(clean.squeeze(1)).unsqueeze(1)
+            
+            # Extract phase for CompositeLoss
+            if isinstance(criterion, CompositeLoss):
+                noisy_complex = stft(noisy.squeeze(1))
+                noisy_phase = torch.angle(noisy_complex)
+            else:
+                noisy_phase = None
 
             pred_spec = model(noisy_spec)
-            loss = criterion(pred_spec, clean_spec)
+            
+            if isinstance(criterion, CompositeLoss):
+                loss = criterion(pred_spec, clean_spec, noisy_phase, clean)
+            else:
+                loss = criterion(pred_spec, clean_spec)
+                
             running_loss += loss.item()
 
     return running_loss / len(loader)
 
-def train_model(config: Config, model, train_loader, val_loader, transform):
+def train_model(config: Config, model, train_loader, val_loader, transform, criterion, optimizer):
     device = config.general.device
     results_dir = config.general.results_dir
     os.makedirs(results_dir, exist_ok=True)
 
-    # Setup CSV logging
-    csv_path = os.path.join(results_dir, "metrics.csv")
-    with open(csv_path, "w", newline="") as f:
+    # Metrics logging setup
+    metrics_path = os.path.join(config.general.results_dir, "metrics.csv")
+    with open(metrics_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["epoch", "train_loss", "val_loss"])
-
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
 
     train_losses = []
     val_losses = []
@@ -83,7 +132,7 @@ def train_model(config: Config, model, train_loader, val_loader, transform):
         val_losses.append(val_loss)
 
         # Log to CSV
-        with open(csv_path, "a", newline="") as f:
+        with open(metrics_path, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([epoch, train_loss, val_loss])
 
@@ -120,4 +169,4 @@ def train_model(config: Config, model, train_loader, val_loader, transform):
 
     plot_losses(train_losses, val_losses, os.path.join(results_dir, "loss_curve.png"))
     print(f"Curva de loss guardada en: {os.path.join(results_dir, 'loss_curve.png')}")
-    print(f"Métricas guardadas en: {csv_path}")
+    print(f"Métricas guardadas en: {metrics_path}")

@@ -1,5 +1,5 @@
 import yaml
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple
 
 @dataclass
@@ -49,12 +49,20 @@ class TrainingConfig:
     log_interval: int
 
 @dataclass
+class LossConfig:
+    type: str = "mse" # "mse", "l1", "huber", "composite"
+    spectral_type: str = "mse" # Used if type is composite
+    alpha: float = 1.0
+    beta: float = 0.1
+
+@dataclass
 class Config:
     general: GeneralConfig
     data: DataConfig
     audio: AudioConfig
     model: ModelConfig
     training: TrainingConfig
+    loss: LossConfig = field(default_factory=LossConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> "Config":
@@ -62,9 +70,10 @@ class Config:
             cfg_dict = yaml.safe_load(f)
         
         return cls(
-            general=GeneralConfig(**cfg_dict["general"]),
-            data=DataConfig(**cfg_dict["data"]),
-            audio=AudioConfig(**cfg_dict["audio"]),
-            model=ModelConfig(**cfg_dict["model"]),
-            training=TrainingConfig(**cfg_dict["training"]),
+            general=GeneralConfig(**cfg_dict.get("general", {})),
+            data=DataConfig(**cfg_dict.get("data", {})),
+            audio=AudioConfig(**cfg_dict.get("audio", {})),
+            model=ModelConfig(**cfg_dict.get("model", {})),
+            training=TrainingConfig(**cfg_dict.get("training", {})),
+            loss=LossConfig(**cfg_dict.get("loss", {})),
         )
