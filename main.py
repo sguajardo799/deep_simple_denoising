@@ -1,9 +1,9 @@
 import os
 import torch
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 
 from src.config import Config
-from src.data import NoisySpeechCommands
+from src.data import NoisySpeechCommands, get_data_splits
 from src.models import UNet2D
 from src.features import get_transform
 from src.train import train_model
@@ -33,10 +33,8 @@ def main():
         max_items=config.data.max_items,
     )
 
-    n_total = len(full_ds)
-    n_train = int(0.8 * n_total)
-    n_val = n_total - n_train
-    train_ds, val_ds = random_split(full_ds, [n_train, n_val])
+    split_path = os.path.join(config.data.root, "splits.json")
+    train_ds, val_ds = get_data_splits(full_ds, split_path, val_ratio=0.2, seed=config.general.seed)
 
     train_loader = DataLoader(
         train_ds,

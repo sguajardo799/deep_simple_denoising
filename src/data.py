@@ -121,3 +121,32 @@ class NoisySpeechCommands(Dataset):
         noisy = self._add_noise(clean)
 
         return noisy, clean
+
+def get_data_splits(dataset, split_path, val_ratio=0.2, seed=42):
+    import torch
+    import json
+    import os
+    from torch.utils.data import Subset
+
+    if os.path.exists(split_path):
+        print(f"Loading splits from {split_path}")
+        with open(split_path, "r") as f:
+            indices = json.load(f)
+            train_indices = indices["train"]
+            val_indices = indices["val"]
+    else:
+        print(f"Creating new splits and saving to {split_path}")
+        n_total = len(dataset)
+        n_val = int(val_ratio * n_total)
+        n_train = n_total - n_val
+        
+        generator = torch.Generator().manual_seed(seed)
+        train_ds, val_ds = torch.utils.data.random_split(dataset, [n_train, n_val], generator=generator)
+        
+        train_indices = train_ds.indices
+        val_indices = val_ds.indices
+        
+        with open(split_path, "w") as f:
+            json.dump({"train": train_indices, "val": val_indices}, f)
+
+    return Subset(dataset, train_indices), Subset(dataset, val_indices)

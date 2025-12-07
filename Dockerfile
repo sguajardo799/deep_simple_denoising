@@ -13,7 +13,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
       librosa \
       torchmetrics[audio] \
       asteroid \
-      PyYAML
+      PyYAML \
+      pystoi \
+      pesq
 
 
 # Directorio de trabajo
