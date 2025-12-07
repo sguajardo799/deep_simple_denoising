@@ -16,6 +16,7 @@ data:
   pin_memory: true
 
 audio:
+  transform_type: "spectrogram" # Options: "spectrogram", "melspectrogram"
   sample_rate: 16000
   n_fft: 512
   hop_length: 128

@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, random_split
 from src.config import Config
 from src.data import NoisySpeechCommands
 from src.models import UNet2D
-from src.utils import get_mel_transform
+from src.features import get_transform
 from src.train import train_model
 
 def main():
@@ -69,10 +69,10 @@ def main():
     ).to(config.general.device)
 
     # 4. Setup Transform
-    mel_transform = get_mel_transform(config.audio, config.general.device)
+    transform = get_transform(config.audio, config.general.device)
 
     # 5. Train
-    train_model(config, model, train_loader, val_loader, mel_transform)
+    train_model(config, model, train_loader, val_loader, transform)
 
 if __name__ == "__main__":
     main()

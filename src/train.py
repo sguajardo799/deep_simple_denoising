@@ -4,9 +4,9 @@ import torch
 import torch.nn as nn
 from tqdm.auto import tqdm
 from src.config import Config
-from src.utils import waveform_to_logmel, plot_losses
+from src.utils import plot_losses
 
-def train_one_epoch(model, loader, criterion, optimizer, mel_transform, device, log_interval, epoch):
+def train_one_epoch(model, loader, criterion, optimizer, transform, device, log_interval, epoch):
     model.train()
     running_loss = 0.0
     loop = tqdm(loader, desc=f"Epoch {epoch} [Train]", leave=False)
@@ -15,8 +15,8 @@ def train_one_epoch(model, loader, criterion, optimizer, mel_transform, device, 
         noisy = noisy.to(device)
         clean = clean.to(device)
 
-        noisy_spec = waveform_to_logmel(noisy, mel_transform)
-        clean_spec = waveform_to_logmel(clean, mel_transform)
+        noisy_spec = transform(noisy.squeeze(1)).unsqueeze(1)
+        clean_spec = transform(clean.squeeze(1)).unsqueeze(1)
 
         optimizer.zero_grad()
         pred_spec = model(noisy_spec)
@@ -31,7 +31,7 @@ def train_one_epoch(model, loader, criterion, optimizer, mel_transform, device, 
 
     return running_loss / len(loader)
 
-def validate_one_epoch(model, loader, criterion, mel_transform, device, epoch):
+def validate_one_epoch(model, loader, criterion, transform, device, epoch):
     model.eval()
     running_loss = 0.0
     
@@ -41,8 +41,8 @@ def validate_one_epoch(model, loader, criterion, mel_transform, device, epoch):
             noisy = noisy.to(device)
             clean = clean.to(device)
 
-            noisy_spec = waveform_to_logmel(noisy, mel_transform)
-            clean_spec = waveform_to_logmel(clean, mel_transform)
+            noisy_spec = transform(noisy.squeeze(1)).unsqueeze(1)
+            clean_spec = transform(clean.squeeze(1)).unsqueeze(1)
 
             pred_spec = model(noisy_spec)
             loss = criterion(pred_spec, clean_spec)
@@ -50,7 +50,7 @@ def validate_one_epoch(model, loader, criterion, mel_transform, device, epoch):
 
     return running_loss / len(loader)
 
-def train_model(config: Config, model, train_loader, val_loader, mel_transform):
+def train_model(config: Config, model, train_loader, val_loader, transform):
     device = config.general.device
     results_dir = config.general.results_dir
     os.makedirs(results_dir, exist_ok=True)
@@ -72,13 +72,13 @@ def train_model(config: Config, model, train_loader, val_loader, mel_transform):
 
     for epoch in range(1, config.training.max_epochs + 1):
         train_loss = train_one_epoch(
-            model, train_loader, criterion, optimizer, mel_transform, 
+            model, train_loader, criterion, optimizer, transform, 
             device, config.training.log_interval, epoch
         )
         train_losses.append(train_loss)
 
         val_loss = validate_one_epoch(
-            model, val_loader, criterion, mel_transform, device, epoch
+            model, val_loader, criterion, transform, device, epoch
         )
         val_losses.append(val_loss)
 

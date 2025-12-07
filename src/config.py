@@ -23,6 +23,7 @@ class DataConfig:
 
 @dataclass
 class AudioConfig:
+    transform_type: str
     sample_rate: int
     n_fft: int
     hop_length: int
