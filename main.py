@@ -1,65 +1,36 @@
 import os
-
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
-import matplotlib.pyplot as plt
-from tqdm.auto import tqdm
-import torchaudio
 
-from data import NoisySpeechCommands
-from models import UNet2D  # <- ahora usamos la U-Net 2D
-
+from src.config import Config
+from src.data import NoisySpeechCommands
+from src.models import UNet2D
+from src.utils import get_mel_transform
+from src.train import train_model
 
 def main():
-    # =========================
-    # 0. Rutas base (persistentes)
-    # =========================
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(base_dir, "data")
-    results_dir = os.path.join(base_dir, "results")
+    # 1. Cargar configuración
+    config_path = "config.yaml"
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found at {config_path}")
+    
+    config = Config.from_yaml(config_path)
+    print(f"Device: {config.general.device}")
 
-    os.makedirs(data_dir, exist_ok=True)
-    os.makedirs(results_dir, exist_ok=True)
-
-    # =========================
-    # 1. Configuración general
-    # =========================
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("Device:", device)
-
-    root = data_dir   # aquí se descargará SPEECHCOMMANDS
-
-    batch_size = 8
-    num_workers = 0
-
-    max_epochs = 100
-    learning_rate = 1e-3
-
-    patience = 10          # early stopping: épocas sin mejora
-    min_delta = 1e-4       # mejora mínima en val_loss para resetear paciencia
-    log_interval = 100     # mostrar loss cada N steps durante el entrenamiento
-
-    sample_rate = 16000
-    n_fft = 512
-    hop_length = 128
-    n_mels = 80
-
-    torch.manual_seed(42)
-
-    # =========================
-    # 2. Dataset y DataLoaders
-    # =========================
+    # 2. Setup Data
+    # Asegurar directorios
+    os.makedirs(config.data.root, exist_ok=True)
+    
     full_ds = NoisySpeechCommands(
-        root=root,
-        download=True,
-        target_sample_rate=sample_rate,
-        duration=10.0,
-        snr_range=(0, 20),
-        noise_type="white",
-        add_reverb=True,
-        reverb_prob=0.5,
-        max_items=1000,
+        root=config.data.root,
+        download=config.data.download,
+        target_sample_rate=config.audio.sample_rate,
+        duration=config.data.duration,
+        snr_range=config.data.snr_range,
+        noise_type=config.data.noise_type,
+        add_reverb=config.data.add_reverb,
+        reverb_prob=config.data.reverb_prob,
+        max_items=config.data.max_items,
     )
 
     n_total = len(full_ds)
@@ -69,172 +40,39 @@ def main():
 
     train_loader = DataLoader(
         train_ds,
-        batch_size=batch_size,
+        batch_size=config.training.batch_size,
         shuffle=True,
-        num_workers=num_workers,
-        pin_memory=True,
+        num_workers=config.data.num_workers,
+        pin_memory=config.data.pin_memory,
     )
 
     val_loader = DataLoader(
         val_ds,
-        batch_size=batch_size,
+        batch_size=config.training.batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True,
+        num_workers=config.data.num_workers,
+        pin_memory=config.data.pin_memory,
     )
 
     print(f"Train samples: {len(train_ds)}  |  Val samples: {len(val_ds)}")
 
-    # =========================
-    # 3. Transforms de espectrograma
-    # =========================
-    mel_transform = torchaudio.transforms.MelSpectrogram(
-        sample_rate=sample_rate,
-        n_fft=n_fft,
-        hop_length=hop_length,
-        n_mels=n_mels,
-        center=True,
-        pad_mode="reflect",
-        power=1.0,         # magnitud
-    ).to(device)
-
-    def waveform_to_logmel(wav: torch.Tensor) -> torch.Tensor:
-        """
-        wav: (B, 1, T)
-        -> log-mel: (B, 1, n_mels, T_frames)
-        """
-        wav_mono = wav.squeeze(1)        # (B, T)
-        mel = mel_transform(wav_mono)    # (B, n_mels, T_frames)
-        log_mel = torch.log1p(mel)       # log(1 + mel) para estabilizar
-        return log_mel.unsqueeze(1)      # (B, 1, n_mels, T_frames)
-
-    # =========================
-    # 4. Modelo, loss, optim
-    # =========================
+    # 3. Setup Model
     model = UNet2D(
-        in_channels=1,
-        out_channels=1,
-        base_channels=32,
-        num_layers=4,
-        kernel_size=3,
-        use_batchnorm=True,
-        dropout=0.0,
+        in_channels=config.model.in_channels,
+        out_channels=config.model.out_channels,
+        base_channels=config.model.base_channels,
+        num_layers=config.model.num_layers,
+        kernel_size=config.model.kernel_size,
+        use_batchnorm=config.model.use_batchnorm,
+        dropout=config.model.dropout,
         final_activation=None,
-    ).to(device)
+    ).to(config.general.device)
 
-    criterion = nn.MSELoss()          # loss en espacio log-mel
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    # 4. Setup Transform
+    mel_transform = get_mel_transform(config.audio, config.general.device)
 
-    # =========================
-    # 5. Loop de entrenamiento
-    # =========================
-    train_losses = []
-    val_losses = []
-
-    best_val_loss = float("inf")
-    best_state_dict = None
-    epochs_no_improve = 0
-
-    for epoch in range(1, max_epochs + 1):
-
-        # ---- Fase de entrenamiento ----
-        model.train()
-        running_train_loss = 0.0
-
-        train_loop = tqdm(train_loader, desc=f"Epoch {epoch} [Train]", leave=False)
-
-        for batch_idx, (noisy, clean) in enumerate(train_loop):
-            noisy = noisy.to(device)   # [B,1,T]
-            clean = clean.to(device)
-
-            noisy_spec = waveform_to_logmel(noisy)
-            clean_spec = waveform_to_logmel(clean)
-
-            optimizer.zero_grad()
-            pred_spec = model(noisy_spec)
-            loss = criterion(pred_spec, clean_spec)
-            loss.backward()
-            optimizer.step()
-
-            running_train_loss += loss.item()
-
-            if (batch_idx + 1) % log_interval == 0:
-                train_loop.set_postfix(
-                    loss=f"{running_train_loss / (batch_idx + 1):.4f}"
-                )
-
-        epoch_train_loss = running_train_loss / len(train_loader)
-        train_losses.append(epoch_train_loss)
-
-        # ---- Fase de validación ----
-        model.eval()
-        running_val_loss = 0.0
-
-        with torch.no_grad():
-            val_loop = tqdm(val_loader, desc=f"Epoch {epoch} [Val]  ", leave=False)
-            for noisy, clean in val_loop:
-                noisy = noisy.to(device)
-                clean = clean.to(device)
-
-                noisy_spec = waveform_to_logmel(noisy)
-                clean_spec = waveform_to_logmel(clean)
-
-                pred_spec = model(noisy_spec)
-                loss = criterion(pred_spec, clean_spec)
-                running_val_loss += loss.item()
-
-        epoch_val_loss = running_val_loss / len(val_loader)
-        val_losses.append(epoch_val_loss)
-
-        print(
-            f"Epoch {epoch:03d}/{max_epochs} "
-            f"| train_loss = {epoch_train_loss:.6f} "
-            f"| val_loss = {epoch_val_loss:.6f}"
-        )
-
-        # ---- Early Stopping ----
-        if epoch_val_loss + min_delta < best_val_loss:
-            best_val_loss = epoch_val_loss
-            best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-            epochs_no_improve = 0
-            print("  -> Mejora en val_loss, guardando mejor modelo.")
-        else:
-            epochs_no_improve += 1
-            print(f"  -> Sin mejora en val_loss ({epochs_no_improve}/{patience}).")
-
-        if epochs_no_improve >= patience:
-            print("Early stopping activado.")
-            break
-
-    # Restaurar mejor modelo y guardar
-    if best_state_dict is not None:
-        model.load_state_dict(best_state_dict)
-        model.to(device)
-        print(f"Mejor val_loss alcanzado: {best_val_loss:.6f}")
-
-        best_model_path = os.path.join(results_dir, "best_model.pt")
-        torch.save(model.state_dict(), best_model_path)
-        print(f"Modelo guardado en: {best_model_path}")
-    else:
-        print("No se guardó ningún mejor estado (algo raro pasó).")
-
-    # =========================
-    # 6. Gráfico final Train vs Val
-    # =========================
-    plt.figure()
-    plt.plot(train_losses, label="Train Loss")
-    plt.plot(val_losses, label="Val Loss")
-    plt.xlabel("Época")
-    plt.ylabel("Loss")
-    plt.title("Evolución Train vs Val Loss (log-mel)")
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-
-    curve_path = os.path.join(results_dir, "loss_curve.png")
-    plt.savefig(curve_path)
-    print(f"Curva de loss guardada en: {curve_path}")
-
+    # 5. Train
+    train_model(config, model, train_loader, val_loader, mel_transform)
 
 if __name__ == "__main__":
     main()

@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
       soundfile \
       librosa \
       torchmetrics[audio] \
-      asteroid
+      asteroid \
+      PyYAML
 
 
 # Directorio de trabajo

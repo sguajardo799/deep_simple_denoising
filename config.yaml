@@ -1,0 +1,39 @@
+general:
+  device: "cpu"
+  seed: 42
+  results_dir: "results"
+
+data:
+  root: "data"
+  download: true
+  duration: 10.0
+  snr_range: [0, 20]
+  noise_type: "white"
+  add_reverb: true
+  reverb_prob: 0.5
+  max_items: 1000
+  num_workers: 0
+  pin_memory: true
+
+audio:
+  sample_rate: 16000
+  n_fft: 512
+  hop_length: 128
+  n_mels: 80
+
+model:
+  in_channels: 1
+  out_channels: 1
+  base_channels: 32
+  num_layers: 4
+  kernel_size: 3
+  use_batchnorm: true
+  dropout: 0.0
+
+training:
+  batch_size: 2
+  max_epochs: 1
+  learning_rate: 1.0e-3
+  patience: 10
+  min_delta: 1.0e-4
+  log_interval: 1
