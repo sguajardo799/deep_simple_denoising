@@ -2,11 +2,12 @@ FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+ && rm -rf /var/lib/apt/lists/*
+
 # Instalar torchaudio y libs de audio
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-      --index-url https://download.pytorch.org/whl/cu124 \
-      torchaudio==2.5.1 && \
     pip install --no-cache-dir \
       soundfile \
       librosa \
