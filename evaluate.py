@@ -135,10 +135,10 @@ def evaluate():
                 "id": i,
                 "stoi": m_stoi.item(),
                 "pesq": m_pesq.item() if not isinstance(m_pesq, float) else m_pesq,
-                "si_sdr": m_sisdr.item(),
-                "snr": m_snr.item(),
-                "mse": m_mse.item(),
-                "mae": m_mae.item()
+                "si_sdr": m_sisdr.item() if not torch.isnan(m_sisdr) else float('nan'),
+                "snr": m_snr.item() if not torch.isnan(m_snr) else float('nan'),
+                "mse": m_mse.item() if not torch.isnan(m_mse) else float('nan'),
+                "mae": m_mae.item() if not torch.isnan(m_mae) else float('nan')
             })
 
     # 6. Save Report

@@ -38,6 +38,11 @@ class CompositeLoss(nn.Module):
         # SI-SDR is higher is better, so we minimize negative SI-SDR
         # SI-SDR returns a value per batch element, we take mean
         sisdr_val = self.si_sdr(pred_wav, clean_wav)
+        
+        # Handle NaNs in SI-SDR (e.g. silence)
+        if torch.isnan(sisdr_val):
+             sisdr_val = torch.tensor(0.0, device=self.device)
+        
         time_loss = -sisdr_val
         
         # Composite

@@ -28,6 +28,8 @@ def reconstruct_waveform(log_spec: torch.Tensor, original_phase: torch.Tensor, c
     # AmplitudeToDB uses 10 * log10(x) for power, or 20 * log10(x) for magnitude.
     # We used stype="magnitude", so x_db = 20 * log10(x).
     # x = 10^(x_db / 20)
+    # Clamp log_spec to prevent overflow/underflow
+    log_spec = torch.clamp(log_spec, min=-100.0, max=100.0)
     spec_mag = torch.pow(10.0, log_spec.squeeze(1) / 20.0)
 
     # 2. Combine with Phase
