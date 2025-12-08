@@ -1,5 +1,6 @@
 general:
   device: "cuda"
+  device_id: 1 # Options: 0, 1
   seed: 42
   results_dir: "results"
 

@@ -7,6 +7,7 @@ class GeneralConfig:
     device: str
     seed: int
     results_dir: str
+    device_id: int = 0
 
 @dataclass
 class DataConfig:
@@ -69,8 +70,12 @@ class Config:
         with open(path, "r") as f:
             cfg_dict = yaml.safe_load(f)
         
+        general_cfg = GeneralConfig(**cfg_dict.get("general", {}))
+        if general_cfg.device == "cuda":
+            general_cfg.device = f"cuda:{general_cfg.device_id}"
+            
         return cls(
-            general=GeneralConfig(**cfg_dict.get("general", {})),
+            general=general_cfg,
             data=DataConfig(**cfg_dict.get("data", {})),
             audio=AudioConfig(**cfg_dict.get("audio", {})),
             model=ModelConfig(**cfg_dict.get("model", {})),
