@@ -16,7 +16,7 @@ data:
   pin_memory: true
 
 audio:
-  transform_type: "melspectrogram" # Options: "spectrogram", "melspectrogram"
+  transform_type: "spectrogram" # Use spectrogram for better inversion in composite loss
   sample_rate: 16000
   n_fft: 512
   hop_length: 128
